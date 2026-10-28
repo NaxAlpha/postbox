@@ -1,0 +1,24 @@
+node_modules/
+dist/
+.cloudflare/
+.postbox/
+mailbox.config.json
+.env*
+.dev.vars*
+coverage/
+test-results/
+playwright-report/
+*.log
+
+# Local mail, credentials, editor and OS files
+.DS_Store
+*.tmp
+*.eml
+*.mbox
+*.sqlite
+*.sqlite3
+*.db
+*.tgz
+*.zip
+.idea/
+.vscode/

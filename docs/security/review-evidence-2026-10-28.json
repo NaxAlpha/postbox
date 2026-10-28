@@ -1,0 +1,152 @@
+{
+  "date": "2026-10-28",
+  "scope": "Postbox 0.1.0 source review; synthetic local reproductions and read-only live checks",
+  "sourceSha256": {
+    "package-lock.json": "64cfc8ea22bae092b026a4b4a6d3def4846cfeefabb709398207ca6dd4a9b8ad",
+    "cloudflare.config.ts": "217ee55225712d54f6bb8642b80c0b9c9477136216cabc6b75119b0e217ed48a",
+    "src/index.ts": "12b83c34e4695941b2fc13bf1a005c3cbb224d53c66561b2c63898be7e19397d",
+    "src/server/security.ts": "0c8893ea4bd4e367a02be2c460c3d88cf2a026db753511973dea595034c59de5",
+    "src/server/mail.ts": "0706ec10eec4ea8a750c748167602d3f5fca6bce329b27e1d55ffa852a8fda21",
+    "src/server/api.ts": "212a22df036bd4e8bee30946e83314ef38a452f857aab2c2b56ec8080958c724",
+    "src/client/main.tsx": "715ee0da3ec83ec298b442a50f131bd9a1016af562e953d2b571dbae55a8d8c0",
+    "scripts/mail-client.mjs": "e06c03e118c1215271bca9e062d5a1e7ecc42a12d4a6c787302c52f7221e9705",
+    "scripts/mail-commands.mjs": "5adea381135404330ebc8936e590a25b313d35db84b38302395233a44587cd31",
+    "scripts/mailbox.mjs": "a45ac340822ec329d73e87a0e57e94adae5725c5b030ce69d2bdb3a2af3f25de",
+    "scripts/destroy.mjs": "97900e966579a684d8c407dc00d3dc4e6efc4fa5e6e9be764c3cb8ac5fad5dc7"
+  },
+  "audit": {
+    "allDependencies": {
+      "info": 0,
+      "low": 1,
+      "moderate": 3,
+      "high": 7,
+      "critical": 0,
+      "total": 11
+    },
+    "productionDependencies": {
+      "info": 0,
+      "low": 1,
+      "moderate": 1,
+      "high": 1,
+      "critical": 0,
+      "total": 3
+    },
+    "note": "Counts are affected dependency entries, including transitive propagation; they are not distinct exploitable application vulnerabilities."
+  },
+  "parser": [
+    {
+      "case": "discarded-iframe",
+      "bytes": 8000,
+      "result": "RangeError",
+      "ms": 29
+    },
+    {
+      "case": "discarded-iframe",
+      "bytes": 16000,
+      "result": "RangeError",
+      "ms": 48
+    },
+    {
+      "case": "discarded-iframe",
+      "bytes": 32000,
+      "result": "RangeError",
+      "ms": 101
+    },
+    {
+      "case": "encoded-header",
+      "words": 2000,
+      "bytes": 32079,
+      "result": "parsed",
+      "ms": 6
+    },
+    {
+      "case": "encoded-header",
+      "words": 4000,
+      "bytes": 64079,
+      "result": "parsed",
+      "ms": 9
+    },
+    {
+      "case": "encoded-header",
+      "words": 8000,
+      "bytes": 128079,
+      "result": "parsed",
+      "ms": 12
+    },
+    {
+      "case": "encoded-header",
+      "words": 16000,
+      "bytes": 256079,
+      "result": "parsed",
+      "ms": 31
+    }
+  ],
+  "nestedHeaders": {
+    "bytes": 384407,
+    "combinedSubjectHeaderBytes": 384000,
+    "configuredHeaderBudget": 262144,
+    "result": "parsed",
+    "ms": 58
+  },
+  "workerdReproductions": {
+    "draftRace": {
+      "staleRevisionStatus": 409,
+      "browserStyleSendStatus": "queued",
+      "queuedRecipients": ["changed@example.test"],
+      "reviewedRevision": 1,
+      "currentRevision": 2
+    },
+    "htmlPoison": {
+      "bytes": 16131,
+      "attempts": [
+        {
+          "ok": false
+        },
+        {
+          "ok": false
+        },
+        {
+          "ok": false
+        }
+      ],
+      "status": "failed",
+      "retryCount": 3
+    }
+  },
+  "fakeProviderCleanup": {
+    "replacementBucketDeleted": true
+  },
+  "liveProbes": [
+    {
+      "path": "/",
+      "status": 302,
+      "accessLoginRedirect": true
+    },
+    {
+      "path": "/api/bootstrap",
+      "status": 302,
+      "accessLoginRedirect": true
+    },
+    {
+      "path": "/api/export",
+      "status": 302,
+      "accessLoginRedirect": true
+    },
+    {
+      "path": "/api/attachments/00000000-0000-4000-8000-000000000000",
+      "status": 302,
+      "accessLoginRedirect": true
+    }
+  ],
+  "liveControls": {
+    "r2ManagedPublicEnabled": false,
+    "r2CustomDomainCount": 0,
+    "access": {
+      "hostnameMatches": true,
+      "policyCount": 1,
+      "exactEmailAllowlist": true,
+      "requiresIdP": true,
+      "requiresAccountMember": true
+    }
+  }
+}

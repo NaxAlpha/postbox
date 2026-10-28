@@ -1,0 +1,54 @@
+{
+  "date": "2026-10-28",
+  "findings": {
+    "R1": "patched postal-mime 4.1.4",
+    "R2": "patched sanitize-html 2.18.1",
+    "R3": "new submissions require the reviewed revision; browser supplies final save revision",
+    "R4": "creation timestamp and installation marker required; legacy deletion refused"
+  },
+  "sourceSha256": {
+    "package-lock.json": "b5da83e29c1f73137edf5491a2d7bfaff7c49a2b778e05146a9bbb54a2544564",
+    "src/server/mail.ts": "cf36a2416a975c33f1e34266d326caeb6a2b9683b3a00955a2d0ba838c91cb28",
+    "src/client/main.tsx": "da7501a59f3e8155e9accbabc5390024d037bb6f4463233c51808bf50928f0bb",
+    "scripts/bucket-ownership.mjs": "78a9d52f668b814a87a0fb1f641f71e1b1e0dfef0b94c2e0af46ca6541bb40e5",
+    "scripts/mailbox.mjs": "2b567f71f6e2181942e3ba0c660dad80c155922469b836c951edbd624345bd58",
+    "scripts/backup.mjs": "446acac597d051de560e77c2a55ab0df8dcc6e71a255c84085490c338b2ae337",
+    "scripts/browser-security-check.mjs": "31e5b7c6f9576a2ba717bfface0ac6ec40de27a5ba81b7b117104703b141c413",
+    "tests/bucket-ownership.test.ts": "8acab5f59d30b517a8c7e5cedd935b30a92d186a4756d283a7a75782b9abd0bb"
+  },
+  "unitTestCount": 72,
+  "checks": {
+    "build": true,
+    "workerdIntegration": true,
+    "browserSecurityRegression": true,
+    "browserBaseline": true,
+    "fullNpmAuditVulnerabilities": 0,
+    "deploymentSucceeded": true,
+    "restoreRejectsForeignOwnershipMarker": true
+  },
+  "liveHttpProbes": [
+    {
+      "path": "/",
+      "status": 302,
+      "accessRedirect": true
+    },
+    {
+      "path": "/api/bootstrap",
+      "status": 302,
+      "accessRedirect": true
+    },
+    {
+      "path": "/api/export",
+      "status": 302,
+      "accessRedirect": true
+    },
+    {
+      "path": "/api/attachments/00000000-0000-4000-8000-000000000000",
+      "status": 302,
+      "accessRedirect": true
+    }
+  ],
+  "liveDestructiveTests": false,
+  "liveEmailsSent": false,
+  "legacyBucketAdopted": false
+}

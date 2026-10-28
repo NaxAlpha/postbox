@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible problem with Postbox.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security vulnerabilities, use private reporting from SECURITY.md. Do not include mail, tokens, private configuration, account IDs, or DNS snapshots here.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic addresses and messages. Include the command or screen involved.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Commit/version, Node.js version, OS, browser, and whether this is local or deployed.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Remove credentials, personal mail, login identities, account IDs, and deployment details.

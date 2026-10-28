@@ -1,0 +1,25 @@
+{
+  "resourcePrefix": "postbox-prod",
+  "accountId": "",
+  "hostname": "",
+  "access": {
+    "teamDomain": "",
+    "audience": "",
+    "allowedUsers": [],
+    "identityProviderId": "",
+    "mfa": false,
+    "sessionDuration": "4h"
+  },
+  "domains": [],
+  "addresses": [],
+  "resources": {
+    "worker": "",
+    "database": "",
+    "bucket": "",
+    "queue": "",
+    "deadLetterQueue": "",
+    "accessApplication": "",
+    "accessPolicy": ""
+  },
+  "limits": { "sendsPerHour": 100, "trashDays": 30, "spamDays": 30 }
+}

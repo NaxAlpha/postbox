@@ -1,0 +1,62 @@
+{
+  "name": "postbox-oss",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "cf dev",
+    "build": "cf workers types && tsc --noEmit && cf build",
+    "test": "vitest run",
+    "test:integration": "node scripts/integration.mjs",
+    "typecheck": "cf workers types && tsc --noEmit",
+    "mailbox": "node scripts/mailbox.mjs",
+    "check": "npm run build && npm test && npm run test:integration",
+    "format": "prettier --write src scripts tests *.ts *.json *.html docs README.md SECURITY.md CONTRIBUTING.md AGENTS.md .github",
+    "format:check": "prettier --check src scripts tests *.ts *.json *.html docs README.md SECURITY.md CONTRIBUTING.md AGENTS.md .github",
+    "test:browser": "node scripts/browser-check.mjs",
+    "postbox": "node scripts/postbox.mjs",
+    "test:browser:security": "node scripts/browser-security-check.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "dependencies": {
+    "jose": "6.2.12",
+    "lucide-react": "1.56.0",
+    "postal-mime": "4.1.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "sanitize-html": "2.18.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.6",
+    "@playwright/test": "1.64.0",
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/sanitize-html": "2.16.2",
+    "@vitejs/plugin-react": "6.1.2",
+    "cf": "1.0.0-beta.24",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261023.1-beta",
+    "prettier": "3.9.10",
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.4"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "bin": {
+    "postbox": "scripts/postbox.mjs"
+  },
+  "description": "A lightweight, self-hosted web mailbox on Cloudflare Workers.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NaxAlpha/postbox.git"
+  },
+  "homepage": "https://github.com/NaxAlpha/postbox#readme",
+  "bugs": {
+    "url": "https://github.com/NaxAlpha/postbox/issues"
+  }
+}

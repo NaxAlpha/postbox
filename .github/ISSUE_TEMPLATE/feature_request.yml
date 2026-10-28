@@ -1,0 +1,17 @@
+name: Feature request
+description: Suggest an improvement to Postbox.
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What are you trying to do?
+      description: Describe the workflow or problem.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed improvement
+      description: Explain the behavior you would like and any alternatives you considered.
+    validations:
+      required: true
