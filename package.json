@@ -20,7 +20,7 @@
     "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
-    "jose": "6.2.12",
+    "jose": "6.2.13",
     "lucide-react": "1.56.0",
     "postal-mime": "4.1.4",
     "react": "19.3.0",
