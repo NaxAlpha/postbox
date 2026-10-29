@@ -12,6 +12,7 @@ Start with the [project README](../README.md) for a local preview and guided dep
 
 ## Validation and security records
 
+- [Teardown improvements](validation/teardown-2026-10-29.md) — dependency ordering, safe retention, and legacy reconciliation
 - [Local validation](validation/local.md)
 - [Live validation](validation/live-2026-10-28.md) — anonymized results from a private deployment
 - [Security review](security/review-2026-10-28.md) and [review evidence](security/review-evidence-2026-10-28.json) — historical pre-fix findings

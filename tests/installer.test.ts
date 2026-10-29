@@ -56,10 +56,14 @@ function fixture() {
  else if(s.startsWith('workers get'))out={id:get('worker').id,name:get('worker').name};
  else if(s.startsWith('d1 get'))out={name:fs.existsSync('rename')?'foreign-db':get('database').name};
  else if(s.startsWith('r2 buckets get')){if(a.length!==4)throw Error('bucket name must be positional');out={name:get('bucket')?.name||a[3],creation_date:fs.existsSync('replace-bucket')?'2099-01-01T00:00:00Z':'2026-10-14T00:00:00Z'};}
+ else if(s.startsWith('queues consumers list'))out=a.includes(get('queue')?.id)&&!fs.existsSync('consumer-detached')?[{consumer_id:'consumer-id',queue_id:get('queue').id,type:'worker',script:fs.existsSync('foreign-consumer')?'foreign-worker':get('worker').name}]:[];
+ else if(s.startsWith('queues consumers delete')){fs.writeFileSync('consumer-detached','1');out=null;}
+ else if(s.startsWith('workers delete')){if(!fs.existsSync('consumer-detached'))throw Error('Worker still has Queue consumer');if(fs.existsSync('fail-worker-once')){fs.unlinkSync('fail-worker-once');throw Error('Transient worker deletion failure');}out=null;}
+ else if(s.startsWith('accounts logs audit list'))out=[{id:'00000000-0000-4000-8000-000000000000',account:{id:c.accountId},action:{type:'create',result:'success',time:'2026-10-14T00:00:00Z'},resource:{product:'r2',type:'buckets',request:{name:get('bucket').name},response:{name:get('bucket').name}},raw:{method:'POST',uri:'/accounts/'+c.accountId+'/r2/buckets'}}];
  else if(s.startsWith('queues get'))out={queue_name:m.resources.find(r=>r.id===a[2]).name};
  else if(s.startsWith('d1 raw'))out=[{results:{columns:['count'],rows:b.sql.startsWith('SELECT count')?[[0]]:[]}}];
  else if(s.startsWith('r2 objects put')){fs.writeFileSync('bucket-marker.json',JSON.stringify(b));out={};}
- else if(s.startsWith('r2 objects get')){process.stdout.write(fs.readFileSync('bucket-marker.json'));process.exit(0);}
+ else if(s.startsWith('r2 objects get')){if(!fs.existsSync('bucket-marker.json')){process.stderr.write('404 Not Found');process.exit(1);}process.stdout.write(fs.readFileSync('bucket-marker.json'));process.exit(0);}
  else if(s.startsWith('r2 objects delete'))out=null;
  else if(s.startsWith('r2 objects list'))out={objects:[]};
  else if(s==='workers types'||s==='build')out=null;
@@ -170,7 +174,7 @@ describe('installer without live Cloudflare calls', () => {
     f.run('uninstall');
     expect(f.calls()).toHaveLength(count);
     f.run('uninstall', '--apply');
-    const deleted = f.calls().filter((a) => a.includes('delete'));
+    const deleted = f.calls().filter((a) => a.includes('delete') && !a.includes('consumers'));
     expect(deleted.map((a) => a[0])).toEqual([
       'workers',
       'queues',
@@ -207,8 +211,11 @@ describe('installer without live Cloudflare calls', () => {
     const f = fixture();
     f.run('install', '--apply');
     writeFileSync(join(f.root, 'shared-policy'), '1');
-    expect(() => f.run('uninstall', '--apply')).toThrow();
-    expect(f.manifest().resources.find((r) => r.kind === 'accessPolicy').owned).toBe(true);
+    f.run('uninstall', '--apply');
+    expect(f.manifest().resources.find((r) => r.kind === 'accessPolicy')).toMatchObject({
+      owned: false,
+      retainedShared: true,
+    });
     expect(
       f.calls().some((a) => a.slice(0, 4).join(' ') === 'zero-trust access policies delete'),
     ).toBe(false);
@@ -256,5 +263,76 @@ it('refuses legacy ownership and altered marker without deleting resources', () 
   expect(() => f.run('uninstall', '--apply', '--delete-mail', '--confirm-prefix=test-box')).toThrow(
     'legacy installation',
   );
+  expect(f.calls().some((a) => a.includes('delete'))).toBe(false);
+});
+
+it('detaches only the owned queue consumer before deleting the Worker and Access', () => {
+  const f = fixture();
+  f.run('install', '--apply');
+  f.run('uninstall', '--apply');
+  const calls = f.calls();
+  const detach = calls.findIndex((a) => a.slice(0, 3).join(' ') === 'queues consumers delete');
+  const worker = calls.findIndex((a) => a[0] === 'workers' && a[1] === 'delete');
+  const access = calls.findIndex(
+    (a) => a.slice(0, 4).join(' ') === 'zero-trust access applications delete',
+  );
+  expect(detach).toBeGreaterThan(-1);
+  expect(detach).toBeLessThan(worker);
+  expect(worker).toBeLessThan(access);
+});
+it('refuses foreign queue consumers before any deletion', () => {
+  const f = fixture();
+  f.run('install', '--apply');
+  writeFileSync(join(f.root, 'foreign-consumer'), '1');
+  expect(() => f.run('uninstall', '--apply')).toThrow('foreign consumer');
+  expect(f.calls().some((a) => a.includes('delete'))).toBe(false);
+});
+it('resumes after a Worker deletion failure without detaching twice', () => {
+  const f = fixture();
+  f.run('install', '--apply');
+  writeFileSync(join(f.root, 'fail-worker-once'), '1');
+  expect(() => f.run('uninstall', '--apply')).toThrow('Transient');
+  f.run('uninstall', '--apply');
+  expect(
+    f.calls().filter((a) => a.slice(0, 3).join(' ') === 'queues consumers delete'),
+  ).toHaveLength(1);
+  expect(f.manifest().status).toBe('mail-retained');
+});
+it('reconciles legacy ownership from an original audit ID during deletion', () => {
+  const f = fixture();
+  f.run('install', '--apply');
+  const m = f.manifest();
+  delete m.resources.find((r) => r.kind === 'bucket').bucketIdentity;
+  writeFileSync(join(f.root, '.postbox/install.json'), JSON.stringify(m));
+  rmSync(join(f.root, 'bucket-marker.json'));
+  f.run(
+    'uninstall',
+    '--apply',
+    '--delete-mail',
+    '--confirm-prefix=test-box',
+    '--bucket-audit-id=00000000-0000-4000-8000-000000000000',
+  );
+  expect(f.manifest().status).toBe('removed');
+  expect(
+    f.manifest().resources.find((r) => r.kind === 'bucket').ownershipReconciliation.auditId,
+  ).toBe('00000000-0000-4000-8000-000000000000');
+});
+
+it('reconciliation-only CLI supports preview, dry-run, and confirmed apply without deleting', () => {
+  const f = fixture();
+  f.run('install', '--apply');
+  const m = f.manifest();
+  delete m.resources.find((r) => r.kind === 'bucket').bucketIdentity;
+  writeFileSync(join(f.root, '.postbox/install.json'), JSON.stringify(m));
+  rmSync(join(f.root, 'bucket-marker.json'));
+  const audit = '--audit-id=00000000-0000-4000-8000-000000000000';
+  expect(JSON.parse(f.run('reconcile-bucket', audit)).status).toBe('verified-preview');
+  expect(JSON.parse(f.run('reconcile-bucket', audit, '--apply', '--dry-run')).status).toBe(
+    'verified-preview',
+  );
+  expect(f.manifest().resources.find((r) => r.kind === 'bucket').bucketIdentity).toBeUndefined();
+  expect(
+    JSON.parse(f.run('reconcile-bucket', audit, '--apply', '--confirm-prefix=test-box')).status,
+  ).toBe('reconciled');
   expect(f.calls().some((a) => a.includes('delete'))).toBe(false);
 });

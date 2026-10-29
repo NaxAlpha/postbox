@@ -34,6 +34,8 @@ const { values } = parseArgs({
     'keep-mail': { type: 'boolean' },
     'confirm-prefix': { type: 'string' },
     subscription: { type: 'string' },
+    'audit-id': { type: 'string' },
+    'bucket-audit-id': { type: 'string' },
   },
 });
 const flag = (name) => values[name.slice(2)] === true,
@@ -48,7 +50,9 @@ function run(file, values, inherit = true) {
   if (result.error) throw result.error;
   if (process.env.POSTBOX_JSON && result.stdout?.length) console.log(result.stdout.toString());
   if (result.status !== 0)
-    throw new Error(`Command failed (${result.status ?? 'interrupted'}): ${values[0] || file}`);
+    throw new Error(
+      `Command failed (${result.status ?? 'interrupted'}): ${values[0] || file}${result.stderr?.length ? ': ' + result.stderr.toString().trim() : ''}`,
+    );
 }
 function installer(action, values = []) {
   run(resolve('scripts/mailbox.mjs'), [action, ...values]);
@@ -193,6 +197,7 @@ try {
         apply: flag('--apply') && !flag('--dry-run'),
         keepMail: flag('--keep-mail'),
         confirmPrefix: option('--confirm-prefix'),
+        bucketAuditId: option('--bucket-audit-id'),
         installer,
       });
     } else {
@@ -203,12 +208,19 @@ try {
         restore: 'restore',
         destroy: 'uninstall',
         'register-events': 'register-events',
+        'reconcile-bucket': 'reconcile-bucket',
       }[command];
       if (!passthrough) throw new Error(`Unknown command: ${command}. Run postbox help.`);
       const forwarded = args.filter(
         (a, i) => !a.startsWith('--project=') && a !== '--project' && args[i - 1] !== '--project',
       );
-      installer(passthrough, forwarded);
+      const normalized = forwarded.flatMap((value, i) => {
+        if (i > 0 && ['--audit-id', '--confirm-prefix'].includes(forwarded[i - 1])) return [];
+        return ['--audit-id', '--confirm-prefix'].includes(value)
+          ? [`${value}=${forwarded[i + 1]}`]
+          : [value];
+      });
+      installer(passthrough, normalized);
     }
   }
 } catch (error) {

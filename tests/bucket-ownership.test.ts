@@ -12,6 +12,7 @@ import {
   BUCKET_MARKER,
   verifyBucketIdentity,
   createBucketIdentity,
+  reconcileLegacyBucket,
 } from '../scripts/bucket-ownership.mjs';
 import { exportMail, restoreMail } from '../scripts/backup.mjs';
 import { configSchema, names } from '../scripts/config.mjs';
@@ -97,4 +98,135 @@ it('excludes ownership markers from backups and permits restore into marker-only
   expect(() => restoreMail(c, m, file, true)).toThrow('empty installation');
   marker.installId = 'foreign-installation';
   expect(() => restoreMail(c, m, file, true)).toThrow('marker does not match');
+});
+
+const auditId = '00000000-0000-4000-8000-000000000000';
+function legacyAudit() {
+  delete bucket.bucketIdentity;
+  const event = {
+    id: auditId,
+    account: { id: c.accountId },
+    action: { type: 'create', result: 'success', time: '2026-10-14T00:00:00Z' },
+    resource: {
+      product: 'r2',
+      type: 'buckets',
+      request: { name: bucket.name },
+      response: { name: bucket.name },
+    },
+    raw: { method: 'POST', uri: `/accounts/${c.accountId}/r2/buckets` },
+  };
+  let stored: any;
+  vi.mocked(cf).mockImplementation((args: string[], _c: any, body: any) => {
+    if (args[0] === 'accounts') return [event];
+    if (args[1] === 'buckets') return { name: bucket.name, creation_date: '2026-10-14T00:00:00Z' };
+    if (args[2] === 'put') {
+      stored = body;
+      return {};
+    }
+    if (args[2] === 'get') {
+      if (stored) return Buffer.from(JSON.stringify(stored));
+      throw Error('404 Not Found');
+    }
+    throw Error('Unexpected ' + args.join(' '));
+  });
+  return {
+    event,
+    setMarker: (value: any) => {
+      stored = value;
+    },
+  };
+}
+it('previews historical identity without writes, then applies with exact prefix and is repeatable', () => {
+  legacyAudit();
+  const persist = vi.fn();
+  expect(reconcileLegacyBucket(c, m, { auditId }).status).toBe('verified-preview');
+  expect(cf.mock.calls.some(([a]) => a.includes('put'))).toBe(false);
+  expect(bucket.bucketIdentity).toBeUndefined();
+  expect(
+    reconcileLegacyBucket(c, m, { auditId, apply: true, confirmPrefix: c.resourcePrefix, persist })
+      .status,
+  ).toBe('reconciled');
+  expect(persist).toHaveBeenCalledOnce();
+  expect(
+    reconcileLegacyBucket(c, m, { auditId, apply: true, confirmPrefix: c.resourcePrefix, persist })
+      .status,
+  ).toBe('already-verified');
+  expect(persist).toHaveBeenCalledOnce();
+});
+it('requires confirmation before reading cloud state for reconciliation', () => {
+  legacyAudit();
+  expect(() =>
+    reconcileLegacyBucket(c, m, { auditId, apply: true, confirmPrefix: 'wrong' }),
+  ).toThrow('confirm-prefix');
+  expect(cf).not.toHaveBeenCalled();
+});
+it.each(['account', 'name', 'timestamp', 'action', 'auditId'])(
+  'rejects mismatched %s audit evidence without writes',
+  (kind) => {
+    const { event } = legacyAudit();
+    if (kind === 'account') event.account.id = 'foreign';
+    if (kind === 'name') event.resource.request.name = 'foreign';
+    if (kind === 'timestamp') event.action.time = '2026-10-15T00:00:00Z';
+    if (kind === 'action') event.action.type = 'view';
+    if (kind === 'auditId') event.id = 'another-id';
+    expect(() =>
+      reconcileLegacyBucket(c, m, {
+        auditId,
+        apply: true,
+        confirmPrefix: c.resourcePrefix,
+        persist: vi.fn(),
+      }),
+    ).toThrow('does not prove');
+    expect(cf.mock.calls.some(([a]) => a.includes('put'))).toBe(false);
+  },
+);
+it('refuses missing audit history and foreign markers rather than adopting by name', () => {
+  legacyAudit();
+  expect(() => reconcileLegacyBucket(c, m, {})).toThrow('original Cloudflare');
+  vi.mocked(cf).mockImplementation((args) =>
+    args[0] === 'accounts' ? [] : { name: bucket.name, creation_date: '2026-10-14T00:00:00Z' },
+  );
+  expect(() => reconcileLegacyBucket(c, m, { auditId })).toThrow('unavailable or ambiguous');
+  const { setMarker } = legacyAudit();
+  setMarker({ ...marker, installId: 'foreign' });
+  expect(() =>
+    reconcileLegacyBucket(c, m, {
+      auditId,
+      apply: true,
+      confirmPrefix: c.resourcePrefix,
+      persist: vi.fn(),
+    }),
+  ).toThrow('foreign or invalid');
+  expect(cf.mock.calls.some(([a]) => a.includes('put'))).toBe(false);
+});
+
+it.each([null, false, 0, ''])(
+  'does not overwrite an existing invalid JSON marker value %s',
+  (value) => {
+    legacyAudit();
+    const previous = vi.mocked(cf).getMockImplementation()!;
+    vi.mocked(cf).mockImplementation((args, c, body) =>
+      args[1] === 'objects' && args[2] === 'get'
+        ? Buffer.from(JSON.stringify(value))
+        : previous(args, c, body),
+    );
+    expect(() =>
+      reconcileLegacyBucket(c, m, {
+        auditId,
+        apply: true,
+        confirmPrefix: c.resourcePrefix,
+        persist: vi.fn(),
+      }),
+    ).toThrow('foreign or invalid');
+    expect(cf.mock.calls.some(([a]) => a.includes('put'))).toBe(false);
+  },
+);
+it('recovers a previously written own marker without replacing it after an interrupted manifest save', () => {
+  const { setMarker } = legacyAudit();
+  const known = '11111111-1111-4111-8111-111111111111';
+  setMarker({ ...marker, marker: known });
+  const persist = vi.fn();
+  reconcileLegacyBucket(c, m, { auditId, apply: true, confirmPrefix: c.resourcePrefix, persist });
+  expect(bucket.bucketIdentity.marker).toBe(known);
+  expect(cf.mock.calls.some(([a]) => a.includes('put'))).toBe(false);
 });

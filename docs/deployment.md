@@ -166,3 +166,9 @@ npm run mailbox -- uninstall --apply --delete-mail --confirm-prefix=YOUR_PREFIX
 It empties the owned R2 bucket before deletion. Provider failures/retention locks produce incomplete cleanup; Access is preserved if application removal failed. Shared domains, MX/DKIM/DMARC, Zero Trust organizations, IdPs, and local backups are retained. Review Cloudflare-managed Custom Domain/DNS leftovers in the dashboard after Worker removal.
 
 Use dedicated resources for this installation. Do not bind its D1/R2/queues to other applications without revising the removal plan: a local ownership manifest cannot independently prove every other application's current dependency. The tool refuses forced Worker deletion with foreign references and does not automatically delete any pre-existing same-prefix resource. Manually created event subscriptions must be registered or removed explicitly before deleting their destination queue.
+
+### Teardown dependencies
+
+`postbox destroy` detaches the Postbox Worker's consumers from owned queues before removing the Worker, then removes the dedicated Access resources. Foreign queue consumers block deletion; shared identity providers and Access policies are retained and reported. Journals support retries after partial cleanup.
+
+For legacy bucket ownership, use the audit-backed `postbox reconcile-bucket` workflow or pass `--bucket-audit-id=ORIGINAL_CREATION_UUID` to destroy. See the [CLI guide](cli.md#reconcile-a-legacy-bucket-safely). Never use a current name or an unrelated creation event as a substitute for original ownership evidence.

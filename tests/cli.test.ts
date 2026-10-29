@@ -151,3 +151,28 @@ it('silent start delegates quietly and returns JSON when the server exits', () =
   const f = fixture();
   expect(JSON.parse(f.run('start', '--silent'))).toMatchObject({ ok: true, command: 'start' });
 });
+
+it('exposes reconciliation help and forwards separate flags in silent mode', () => {
+  const f = fixture();
+  expect(f.run('help', 'reconcile-bucket')).toContain('original Cloudflare');
+  const auditId = '00000000-0000-4000-8000-000000000000';
+  expect(
+    JSON.parse(
+      f.run(
+        'reconcile-bucket',
+        '--audit-id',
+        auditId,
+        '--apply',
+        '--confirm-prefix',
+        'test-box',
+        '--silent',
+      ),
+    ).ok,
+  ).toBe(true);
+  expect(JSON.parse(readFileSync(join(f.dir, 'installer.jsonl'), 'utf8').trim())).toEqual([
+    'reconcile-bucket',
+    `--audit-id=${auditId}`,
+    '--apply',
+    '--confirm-prefix=test-box',
+  ]);
+});

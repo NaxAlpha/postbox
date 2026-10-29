@@ -113,7 +113,7 @@ postbox destroy --apply --confirm-prefix=YOUR_PREFIX --keep-mail
 
 `destroy` previews complete removal by default, including D1/R2 mail, queues, Worker, owned recipient/catch-all rules, Access app/policy, recorded sending/receiving onboarding, recorded DNS, and the owned identity provider. Execution requires both `--apply` and the exact `--confirm-prefix`; `--yes` does not bypass the prefix requirement. Mail deletion is permanent. `--keep-mail` explicitly retains D1/R2.
 
-The CLI checks setup ownership and current DNS/route/IdP dependencies before teardown. It stops if a record was edited, a domain gained unrelated routes, or an identity provider is shared. Core compute is removed before Access; domain/DNS cleanup follows only after core removal succeeds. Completion is recorded so removal can resume. Keep local journals and exports until verification finishes. Cloudflare accounts, DNS zones, shared Zero Trust organization settings, reused DNS/domain onboarding, unrelated routes, and local backups are retained.
+The CLI checks setup ownership and current DNS/route/IdP dependencies before teardown. It stops if a record was edited, a domain gained unrelated routes, or a queue has a foreign consumer. Shared identity providers and Access policies are retained and reported rather than blocking removal of dedicated resources. Their references are checked again immediately before deletion, and retention is recorded in the private journal. Owned queue consumers are detached before the Worker is removed; the serving Worker is removed before Access; domain/DNS cleanup follows only after core removal succeeds. Completion is recorded so removal can resume. Keep local journals and exports until verification finishes. Cloudflare accounts, DNS zones, shared Zero Trust organization settings, reused DNS/domain onboarding, unrelated routes, and local backups are retained.
 
 Pending/uncertain domain operations must be reconciled first. Older deployments without a complete setup journal cannot claim ownership of domain/DNS records by prefix alone; preserve their original creation records and explicitly migrate verified IDs into the journal before full teardown. The CLI does not guess ownership.
 
@@ -198,3 +198,33 @@ For local development, start `postbox start` in another terminal, then use `post
 New installations bind R2 cleanup to the bucket's original creation timestamp and an installation-specific marker. Deletion rejects same-name replacements and missing/altered markers before removing resources. Export excludes the marker; restore keeps the destination installation's marker.
 
 Older manifests cannot safely be upgraded by assuming that the bucket currently using a name is the original. Mail deletion stays blocked until an operator explicitly reconciles the original bucket identity. Use `postbox destroy --apply --confirm-prefix=PREFIX --keep-mail` to remove the application while retaining mail storage. There is no force bypass that adopts an unknown bucket. `postbox destroy --help` includes this restriction.
+
+## Reconcile a legacy bucket safely
+
+Older installations may lack a bucket creation identity and ownership marker. A name match does not establish ownership. Supply the **original successful R2 creation audit entry ID** from the installation's historical Cloudflare audit records:
+
+```sh
+postbox reconcile-bucket --audit-id=ORIGINAL_CREATION_UUID --silent
+postbox reconcile-bucket --audit-id=ORIGINAL_CREATION_UUID \
+  --apply --confirm-prefix=YOUR_PREFIX --silent
+postbox destroy --apply --confirm-prefix=YOUR_PREFIX --silent
+```
+
+The first command is read-only. Confirmed reconciliation verifies the account, bucket name, successful creation action, original request endpoint, and audit timestamp against the bucket's immutable creation time before writing a marker and updating the private manifest. A recreated bucket, an unrelated audit event, a foreign marker, or unavailable/expired audit history is rejected. Do not substitute a recent view event or a replacement bucket's creation entry for the original installation record.
+
+You can combine reconciliation with removal:
+
+```sh
+postbox destroy --apply --confirm-prefix=YOUR_PREFIX \
+  --bucket-audit-id=ORIGINAL_CREATION_UUID --silent
+```
+
+Interactive reconciliation prompts for the audit ID and exact prefix when needed. `--dry-run` never applies reconciliation. If historical proof is unavailable, use `--keep-mail`; there is no force-adoption bypass. A previously written marker from an interrupted reconciliation can be recovered only when it matches this installation.
+
+## Teardown dependencies and retries
+
+The CLI validates consumers on its owned queues and detaches only the recorded Postbox Worker's consumers before deleting the Worker. It rechecks each consumer before detachment and refuses queue deletion if consumers remain. Foreign consumers are never removed automatically.
+
+Identity providers referenced by other Access applications, including applications that allow all providers, are preserved. Shared Access policies are preserved too. Retained names are printed and ownership journals record why they remain. This lets the rest of the deployment be removed without changing unrelated authentication.
+
+Completed removals and successful consumer detachment are journaled. Re-run the same confirmed destroy command after reviewing a failure; it resumes from recorded state. It does not guess ownership of changed resources. Preserve configuration and journals until verification is complete. `--silent` failures include the lower-level cleanup reason so an agent can distinguish missing proof, a foreign consumer, and a provider error.

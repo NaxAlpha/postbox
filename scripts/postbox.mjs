@@ -45,8 +45,12 @@ and reviewed sending. Requires a terminal; use list/view/draft/send for automati
     'postbox deploy [--yes] [--dry-run]\nReview and apply domain DNS, Access, storage and Worker deployment. --yes is required without a terminal.',
   domains:
     'postbox domains [--apply --yes] [--dry-run]\nInspect domains/DNS; --apply makes changes after confirmation.',
+  'reconcile-bucket': `postbox reconcile-bucket --audit-id=ORIGINAL_CREATION_AUDIT_UUID [--apply --confirm-prefix=PREFIX]
+Verify legacy bucket identity against the original Cloudflare creation audit entry.
+Read-only by default. Applying writes an ownership marker and updates the private manifest.
+A bucket name or current metadata alone is insufficient; missing/foreign evidence fails closed.`,
   destroy:
-    'postbox destroy [--apply --confirm-prefix=PREFIX] [--keep-mail] [--dry-run]\nPreview by default. Apply permanently deletes owned resources and mail. Exact prefix is mandatory.',
+    'postbox destroy [--apply --confirm-prefix=PREFIX] [--keep-mail] [--bucket-audit-id=UUID] [--dry-run]\nPreview by default. Apply permanently deletes owned resources and mail. Exact prefix is mandatory.',
   start:
     'postbox start\nRun a persistent loopback local development server with simulated mail sending.',
   login:
@@ -152,7 +156,10 @@ Example: postbox auth --silent`,
 --confirm-prefix. Preview with postbox destroy --silent and create a backup with export.
 --keep-mail retains mail storage; other owned resources are still removed. Bucket deletion
 requires the original creation time and installation marker. Legacy manifests without these
-fail closed; use --keep-mail until ownership is explicitly reconciled. Shared/reused
+fail closed. Use reconcile-bucket --audit-id=ORIGINAL_UUID to preview evidence, then apply
+with exact prefix confirmation, or pass --bucket-audit-id=ORIGINAL_UUID to destroy.
+Without historical proof use --keep-mail. Shared identity providers are retained and reported.
+Owned queue consumers are detached before Worker removal. Shared/reused
 resources remain protected by ownership checks. Do not retry partial failures blindly.
 Example (preview only): postbox destroy --silent`,
   deploy: `Changes Cloudflare resources and may revoke mailbox Access sessions. Inspect first with
@@ -339,16 +346,33 @@ try {
     );
     if (
       !nonInteractive &&
-      command === 'destroy' &&
+      command === 'reconcile-bucket' &&
+      !filtered.some((a) => a === '--audit-id' || a.startsWith('--audit-id='))
+    ) {
+      rl ||= createInterface({ input: process.stdin, output: process.stdout });
+      filtered.push(
+        '--audit-id=' +
+          (
+            await rl.question(
+              'Original R2 bucket creation audit ID (from historical installation records): ',
+            )
+          ).trim(),
+      );
+    }
+    if (
+      !nonInteractive &&
+      ['destroy', 'reconcile-bucket'].includes(command) &&
       filtered.includes('--apply') &&
       !filtered.some((a) => a === '--confirm-prefix' || a.startsWith('--confirm-prefix='))
     ) {
-      rl = createInterface({ input: process.stdin, output: process.stdout });
+      rl ||= createInterface({ input: process.stdin, output: process.stdout });
       filtered.push(
         '--confirm-prefix=' +
           (
             await rl.question(
-              'Type the exact resource prefix to permanently destroy this installation: ',
+              command === 'destroy'
+                ? 'Type the exact resource prefix to permanently destroy this installation: '
+                : 'Type the exact resource prefix to reconcile bucket ownership: ',
             )
           ).trim(),
       );

@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { cf, listPages } from './provider.mjs';
 import { validateManifest, names } from './config.mjs';
 import { setupState, savePrivate } from './setup.mjs';
-const clone = (value) => JSON.parse(JSON.stringify(value));
 function get(args, c) {
   try {
     return cf(args, c);
@@ -96,6 +95,21 @@ export function destructionPlan(c, { keepMail = false } = {}) {
     })),
     dns: dns.map(({ id, zoneId, name, type }) => ({ id, zoneId, name, type })),
     identityProviders: identities.map(({ id, name }) => ({ id, name })),
+    retainedCoreResources:
+      install?.resources
+        .filter((r) => r.retainedShared)
+        .map(({ kind, id, name, retentionReason }) => ({
+          kind,
+          id,
+          name,
+          reason: retentionReason,
+        })) || [],
+    retainedIdentityProviders: state.resources
+      .filter((r) => r.kind === 'identityProvider' && r.retainedShared)
+      .map(({ id, name, retentionReason }) => ({ id, name, reason: retentionReason })),
+    legacyBucketRequiresReconciliation:
+      !keepMail &&
+      !!install?.resources.some((r) => r.kind === 'bucket' && r.owned && !r.bucketIdentity),
     retainedShared: [
       'Cloudflare account and DNS zones',
       'Zero Trust organization',
@@ -112,7 +126,7 @@ export function printDestruction(plan) {
 }
 export function destroyInstallation(
   c,
-  { apply = false, keepMail = false, confirmPrefix, installer } = {},
+  { apply = false, keepMail = false, confirmPrefix, bucketAuditId, installer } = {},
 ) {
   const plan = destructionPlan(c, { keepMail });
   printDestruction(plan);
@@ -180,21 +194,26 @@ export function destroyInstallation(
     const live = get(['zero-trust', 'identity-providers', 'get', idp.id], c);
     if (live && live.name !== idp.name) throw new Error('Identity provider name changed');
     if (
+      live &&
       apps.some(
         (a) =>
           a.id !== m?.resources.find((r) => r.kind === 'accessApplication')?.id &&
           (!a.allowed_idps?.length || a.allowed_idps.includes(idp.id)),
       )
     )
-      throw new Error(
-        'Owned identity provider is referenced by another application; refusing deletion',
-      );
+      console.log(`Will retain shared identity provider: ${idp.name}`);
   }
   if (m?.resources.some((r) => r.owned)) {
     if (!installer) throw new Error('Installer is required for core resource removal');
     installer('uninstall', [
       '--apply',
-      ...(!keepMail ? ['--delete-mail', `--confirm-prefix=${c.resourcePrefix}`] : []),
+      ...(!keepMail
+        ? [
+            '--delete-mail',
+            `--confirm-prefix=${c.resourcePrefix}`,
+            ...(bucketAuditId ? [`--bucket-audit-id=${bucketAuditId}`] : []),
+          ]
+        : []),
     ]);
   }
   // The Worker is now removed; Access was retained until that succeeded by the installer.
@@ -232,8 +251,31 @@ export function destroyInstallation(
   for (const resource of state.resources.filter(
     (r) => r.kind === 'identityProvider' && r.owned && !r.removedAt,
   )) {
-    if (get(['zero-trust', 'identity-providers', 'get', resource.id], c))
+    const live = get(['zero-trust', 'identity-providers', 'get', resource.id], c);
+    if (live && live.name !== resource.name)
+      throw new Error('Identity provider changed during teardown; refusing deletion');
+    if (live) {
+      const references = listPages(['zero-trust', 'access', 'applications', 'list'], c).filter(
+        (a) =>
+          a.id !== m?.resources.find((r) => r.kind === 'accessApplication')?.id &&
+          (!a.allowed_idps?.length || a.allowed_idps.includes(resource.id)),
+      );
+      if (references.length) {
+        resource.owned = false;
+        resource.retainedShared = true;
+        resource.retentionReason = 'Referenced by another Access application';
+        resource.sharedWith = references.map((a) => a.id);
+        persist();
+        plan.retainedIdentityProviders.push({
+          id: resource.id,
+          name: resource.name,
+          reason: resource.retentionReason,
+        });
+        console.log(`Retained shared identity provider: ${resource.name}`);
+        continue;
+      }
       cf(['zero-trust', 'identity-providers', 'delete', resource.id, '--force'], c);
+    }
     resource.removedAt = new Date().toISOString();
     resource.owned = false;
     persist();

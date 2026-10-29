@@ -186,12 +186,28 @@ it('refuses domains that gained foreign active mail routes', () => {
   ).toThrow('other active email routes');
   expect(installer).not.toHaveBeenCalled();
 });
-it('refuses identity providers shared by another app', () => {
-  apps = [{ id: 'foreign', allowed_idps: ['idp'] }];
-  expect(() =>
-    destroyInstallation(c, { apply: true, confirmPrefix: c.resourcePrefix, installer }),
-  ).toThrow('another application');
-  expect(installer).not.toHaveBeenCalled();
+it.each([
+  ['explicit', ['idp']],
+  ['all-providers', []],
+])('retains %s shared identity providers while completing teardown', (_kind, allowed_idps) => {
+  apps = [{ id: 'foreign', allowed_idps }];
+  const result = destroyInstallation(c, {
+    apply: true,
+    confirmPrefix: c.resourcePrefix,
+    installer,
+  });
+  expect(installer).toHaveBeenCalled();
+  expect(events.some((e) => e === 'zero-trust identity-providers delete idp --force')).toBe(false);
+  const saved = JSON.parse(readFileSync('.postbox/setup.json', 'utf8'));
+  expect(saved.resources[0]).toMatchObject({
+    owned: false,
+    retainedShared: true,
+    sharedWith: ['foreign'],
+  });
+  expect(result.retainedIdentityProviders).toHaveLength(1);
+  events = [];
+  destroyInstallation(c, { apply: true, confirmPrefix: c.resourcePrefix, installer });
+  expect(events.some((e) => e.includes('delete'))).toBe(false);
 });
 it('preserves all setup resources if core removal fails', () => {
   expect(() =>
@@ -220,4 +236,28 @@ it('can resume after completed removal without deleting again', () => {
   events = [];
   destroyInstallation(c, { apply: true, confirmPrefix: c.resourcePrefix, installer });
   expect(events.some((e) => e.includes('delete') || e.includes('disable'))).toBe(false);
+});
+
+it('preserves an IdP that becomes shared during teardown', () => {
+  const core = (command, args) => {
+    installer(command, args);
+    apps = [{ id: 'new-other-app', allowed_idps: ['idp'] }];
+  };
+  destroyInstallation(c, { apply: true, confirmPrefix: c.resourcePrefix, installer: core });
+  expect(events.some((e) => e === 'zero-trust identity-providers delete idp --force')).toBe(false);
+  expect(JSON.parse(readFileSync('.postbox/setup.json', 'utf8')).resources[0].retainedShared).toBe(
+    true,
+  );
+});
+it('forwards an explicitly supplied legacy bucket audit ID to core cleanup', () => {
+  destroyInstallation(c, {
+    apply: true,
+    confirmPrefix: c.resourcePrefix,
+    bucketAuditId: 'original-audit',
+    installer,
+  });
+  expect(installer).toHaveBeenCalledWith(
+    'uninstall',
+    expect.arrayContaining(['--bucket-audit-id=original-audit']),
+  );
 });

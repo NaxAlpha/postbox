@@ -10,7 +10,12 @@ import {
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { createBucketIdentity, verifyBucketIdentity, BUCKET_MARKER } from './bucket-ownership.mjs';
+import {
+  createBucketIdentity,
+  verifyBucketIdentity,
+  reconcileLegacyBucket,
+  BUCKET_MARKER,
+} from './bucket-ownership.mjs';
 import { exportMail, restoreMail } from './backup.mjs';
 import { cf, rows, listPages, rawSql } from './provider.mjs';
 import { configSchema, names, validateLive, validateManifest } from './config.mjs';
@@ -19,7 +24,7 @@ const command = process.argv[2] || 'help',
 const path = resolve('mailbox.config.json'),
   state = resolve('.postbox/install.json'),
   cli = resolve('node_modules/cf/bin/cf');
-const help = `Postbox installation tools\n\n  npm run mailbox -- init                 Create private editable configuration\n  npm run mailbox -- plan                 Show derived resources without API calls\n  npm run mailbox -- install --apply      Provision Access/storage and deploy\n  npm run mailbox -- connect-mail --apply Add owned email routes after onboarding\n  npm run mailbox -- register-events --apply --subscription=ID
+const help = `Postbox installation tools\n\n  npm run mailbox -- reconcile-bucket --audit-id=UUID [--apply --confirm-prefix=PREFIX]\n  npm run mailbox -- init                 Create private editable configuration\n  npm run mailbox -- plan                 Show derived resources without API calls\n  npm run mailbox -- install --apply      Provision Access/storage and deploy\n  npm run mailbox -- connect-mail --apply Add owned email routes after onboarding\n  npm run mailbox -- register-events --apply --subscription=ID
                                           Own a manually created sending event subscription
   npm run mailbox -- doctor               Inspect deployed resources and security\n  npm run mailbox -- upgrade --apply      Apply schema/config and redeploy\n  npm run mailbox -- export               Export D1 and all private R2 objects
   npm run mailbox -- restore --backup=PATH/backup.json [--apply]
@@ -449,8 +454,50 @@ function uninstall(c, m) {
     if ((current.name || current.queue_name) !== r.name)
       throw new Error(`Owned ${r.kind} name changed; refusing deletion`);
   }
-  if (deleteMail && owned(m, 'bucket')) verifyBucketIdentity(c, m, owned(m, 'bucket'));
+  if (deleteMail && owned(m, 'bucket')) {
+    const auditId = [...flags].find((f) => f.startsWith('--bucket-audit-id='))?.slice(18);
+    if (!owned(m, 'bucket').bucketIdentity && auditId)
+      reconcileLegacyBucket(c, m, { auditId, apply: true, confirmPrefix: m.prefix, persist: save });
+    verifyBucketIdentity(c, m, owned(m, 'bucket'));
+  }
+  const detach = [];
+  if (worker)
+    for (const q of m.resources.filter(
+      (r) => r.owned && ['queue', 'deadLetterQueue'].includes(r.kind),
+    )) {
+      for (const consumer of rows(cf(['queues', 'consumers', 'list', '--queue-id', q.id], c))) {
+        if (
+          consumer.type !== 'worker' ||
+          consumer.script !== worker.name ||
+          consumer.queue_id !== q.id ||
+          !consumer.consumer_id
+        )
+          throw new Error('Owned queue has an unrecognized or foreign consumer; refusing teardown');
+        detach.push({ queueId: q.id, id: consumer.consumer_id });
+      }
+    }
   removeRoutes(c, m);
+  for (const consumer of detach) {
+    const current = rows(
+      cf(['queues', 'consumers', 'list', '--queue-id', consumer.queueId], c),
+    ).find((x) => x.consumer_id === consumer.id);
+    if (!current) continue;
+    if (
+      current.type !== 'worker' ||
+      current.script !== worker.name ||
+      current.queue_id !== consumer.queueId
+    )
+      throw new Error('Queue consumer changed ownership during teardown; refusing detachment');
+    cf(
+      ['queues', 'consumers', 'delete', consumer.id, '--queue-id', consumer.queueId, '--force'],
+      c,
+    );
+    m.detachedConsumers = [
+      ...(m.detachedConsumers || []),
+      { ...consumer, detachedAt: new Date().toISOString() },
+    ];
+    save(m);
+  }
   // Remove the serving Worker first. Access stays intact while any application endpoint exists.
   const order = [
     'worker',
@@ -472,9 +519,11 @@ function uninstall(c, m) {
           throw new Error('Event subscription ownership changed');
         cf(['queues', 'subscriptions', 'delete', r.id, '--force'], c);
       } else if (kind === 'worker') cf(['workers', 'delete', r.id, '--force'], c);
-      else if (kind === 'queue' || kind === 'deadLetterQueue')
+      else if (kind === 'queue' || kind === 'deadLetterQueue') {
+        if (rows(cf(['queues', 'consumers', 'list', '--queue-id', r.id], c)).length)
+          throw new Error('Queue has consumers after detachment; refusing queue deletion');
         cf(['queues', 'delete', r.id, '--force'], c);
-      else if (kind === 'database') cf(['d1', 'delete', r.id, '--force'], c);
+      } else if (kind === 'database') cf(['d1', 'delete', r.id, '--force'], c);
       else if (kind === 'bucket') {
         let page;
         verifyBucketIdentity(c, m, r);
@@ -495,8 +544,18 @@ function uninstall(c, m) {
         cf(['zero-trust', 'access', 'applications', 'delete', r.id, '--force'], c);
       else if (kind === 'accessPolicy') {
         const apps = listPages(['zero-trust', 'access', 'applications', 'list'], c);
-        if (apps.some((a) => a.policies?.some((p) => (typeof p === 'string' ? p : p.id) === r.id)))
-          throw new Error('Owned policy is referenced by another application; retain it');
+        const references = apps.filter((a) =>
+          a.policies?.some((p) => (typeof p === 'string' ? p : p.id) === r.id),
+        );
+        if (references.length) {
+          r.owned = false;
+          r.retainedShared = true;
+          r.retentionReason = 'Referenced by another Access application';
+          r.sharedWith = references.map((a) => a.id);
+          save(m);
+          console.log(`Retained shared Access policy: ${r.name}`);
+          continue;
+        }
         cf(['zero-trust', 'access', 'policies', 'delete', r.id, '--force'], c);
       }
       r.owned = false;
@@ -589,7 +648,24 @@ try {
         if (!existsSync(state))
           throw new Error('Installation manifest is missing; refusing account actions');
         const m = validateManifest(JSON.parse(readFileSync(state, 'utf8')), c);
-        if (command === 'doctor') await doctor(c, m);
+        if (command === 'reconcile-bucket') {
+          const auditId = [...flags].find((f) => f.startsWith('--audit-id='))?.slice(11);
+          const confirmPrefix = [...flags]
+            .find((f) => f.startsWith('--confirm-prefix='))
+            ?.slice(17);
+          console.log(
+            JSON.stringify(
+              reconcileLegacyBucket(c, m, {
+                auditId,
+                apply: flags.has('--apply') && !flags.has('--dry-run'),
+                confirmPrefix,
+                persist: save,
+              }),
+              null,
+              2,
+            ),
+          );
+        } else if (command === 'doctor') await doctor(c, m);
         else if (command === 'connect-mail') {
           if (!flags.has('--apply')) throw new Error('Use --apply to connect mail routes');
           connect(c, m);
